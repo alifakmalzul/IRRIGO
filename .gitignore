@@ -1,0 +1,24 @@
+# Build artifacts
+build/
+sdkconfig.old
+
+# Dependencies
+dependencies.lock
+managed_components/
+
+# IDE
+.vscode/
+.devcontainer/
+.clangd
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Personal/sensitive files
+*.pdf
