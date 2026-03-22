@@ -14,7 +14,6 @@
 #include <time.h>
 #include "freertos/queue.h"
 #include "esp_task_wdt.h"
-#include "app_driver.c"
 #include "esp_rmaker_ota.h"
 
 // Logging tag for ESP RainMaker
@@ -68,7 +67,7 @@ static esp_err_t write_cb(const esp_rmaker_device_t *device, const esp_rmaker_pa
     return ESP_OK;
 }
 
-// Callback for voice assistant control of the water pump
+// Callback for voice assistant control and schedule updates for the water pump device
 static esp_err_t voice_control_callback(const esp_rmaker_device_t *device, 
     const esp_rmaker_param_t *param, 
     const esp_rmaker_param_val_t val, 
@@ -79,6 +78,36 @@ static esp_err_t voice_control_callback(const esp_rmaker_device_t *device,
         ESP_LOGI(TAG, "Received control request via: %s", esp_rmaker_device_cb_src_to_str(ctx->src));
     }
 
+    // Handle watering schedule updates
+    if (param == watering_schedule_param) {
+        if (val.type == RMAKER_VAL_TYPE_STRING) {
+            ESP_LOGI(TAG, "New Watering Schedules: %s", val.val.s);
+            if (strlen(val.val.s) >= 128) {
+                ESP_LOGE(TAG, "Watering schedule string too long, ignoring");
+                return ESP_ERR_INVALID_ARG;
+            }
+            char schedule_copy[128];
+            strncpy(schedule_copy, val.val.s, sizeof(schedule_copy) - 1);
+            schedule_copy[sizeof(schedule_copy) - 1] = '\0';
+            char *saveptr = NULL;
+            char *schedule = strtok_r(schedule_copy, ",", &saveptr);
+            int i = 0;
+            while (schedule != NULL && i < MAX_WATERING_TIMES) {
+                int hour, minute;
+                if (sscanf(schedule, "%d:%d", &hour, &minute) == 2) {
+                    watering_times[i].tm_hour = hour;
+                    watering_times[i].tm_min = minute;
+                    ESP_LOGI(TAG, "Stored watering time[%d]: %02d:%02d", i, hour, minute);
+                    i++;
+                }
+                schedule = strtok_r(NULL, ",", &saveptr);
+            }
+            esp_rmaker_param_update(param, val);
+        }
+        return ESP_OK;
+    }
+
+    // Handle pump power toggle
     if (val.type == RMAKER_VAL_TYPE_BOOLEAN) {
         if (xSemaphoreTake(watering_mutex, pdMS_TO_TICKS(1000))) {
             bool new_state = val.val.b;
@@ -128,28 +157,6 @@ void set_new_watering_time(const char *time_str) {
     } else {
         ESP_LOGE(TAG, "Invalid time format for watering schedule: %s", time_str);
     }
-}
-
-// RainMaker callback for schedule updates (comma-separated "HH:MM" strings)
-static esp_err_t watering_schedules_cb(const esp_rmaker_device_t *device, const esp_rmaker_param_t *param,
-    const esp_rmaker_param_val_t val, void *priv_data, esp_rmaker_write_ctx_t *ctx) {
-    if (val.type == RMAKER_VAL_TYPE_STRING) {
-        ESP_LOGI(TAG, "New Watering Schedules: %s", val.val.s);
-
-        char *schedule = strtok(val.val.s, ",");
-        int i = 0;
-        while (schedule != NULL && i < MAX_WATERING_TIMES) {
-            int hour, minute;
-            if (sscanf(schedule, "%d:%d", &hour, &minute) == 2) {
-                watering_times[i].tm_hour = hour;
-                watering_times[i].tm_min = minute;
-                ESP_LOGI(TAG, "Stored watering time: %02d:%02d", hour, minute);
-                i++;
-            }
-            schedule = strtok(NULL, ",");
-        }
-    }
-    return ESP_OK;
 }
 
 // Send unified push + UI notification via RainMaker
@@ -344,7 +351,7 @@ void app_main(){
 
     // RainMaker node configuration
     esp_rmaker_config_t rainmaker_cfg = {
-        .enable_time_sync = false,
+        .enable_time_sync = true,
     };
 
     esp_rmaker_node_t *node = esp_rmaker_node_init(&rainmaker_cfg, "Plant Watering System", "Test Notifications");

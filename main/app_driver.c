@@ -9,7 +9,7 @@ void app_driver_init() {
 }
 
 esp_err_t app_driver_set_gpio(const char *param_name, bool state) {
-    if (strcmp(param_name, "Pump") == 0) {
+    if (strcmp(param_name, "Power") == 0) {
         gpio_set_level(PUMP_GPIO, state);
     } else {
         return ESP_FAIL;
